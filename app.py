@@ -52,8 +52,8 @@ HTML = """<!DOCTYPE html>
         </div>
         <div class="student">
             <p class="title">软件工程导论 · 实验项目</p>
-            <p class="name">秦顺卿</p>
-            <p class="sid">2440666115</p>
+            <p class="name">陆俊荣</p>
+            <p class="sid">2440666123</p>
         </div>
     </div>
 </body>

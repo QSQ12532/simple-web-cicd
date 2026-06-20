@@ -30,6 +30,14 @@ HTML = """<!DOCTYPE html>
         .info { background: #f5f5f5; border-radius: 8px; padding: 16px;
                 text-align: left; font-size: 13px; color: #666; line-height: 1.8; }
         .info span { color: #333; font-weight: 600; }
+        .student {
+            margin-top: 24px; padding: 16px; border-radius: 8px;
+            background: linear-gradient(135deg, #ffecd2 0%, #fcb69f 100%);
+            text-align: center;
+        }
+        .student .title { font-size: 13px; color: #8c5a3c; font-weight: 600; margin-bottom: 8px; letter-spacing: 1px; }
+        .student .name { font-size: 22px; color: #333; font-weight: 700; margin-bottom: 4px; }
+        .student .sid { font-family: "Courier New", monospace; font-size: 18px; color: #555; letter-spacing: 2px; }
     </style>
 </head>
 <body>
@@ -41,6 +49,11 @@ HTML = """<!DOCTYPE html>
             <p><span>容器 ID：</span>{{ hostname }}</p>
             <p><span>部署时间：</span>{{ deploy_time }}</p>
             <p><span>环境：</span>{{ environment }}</p>
+        </div>
+        <div class="student">
+            <p class="title">软件工程导论 · 实验项目</p>
+            <p class="name">秦顺卿</p>
+            <p class="sid">2440666115</p>
         </div>
     </div>
 </body>

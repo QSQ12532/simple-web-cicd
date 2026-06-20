@@ -1,0 +1,156 @@
+# ============================================================
+# Simple Web CI/CD — Flask + Docker
+#
+# 流水线:
+#   1. validate → 安装依赖 + 运行测试
+#   2. build    → 构建 Docker 镜像 + 导出 tar
+#   3. deploy   → SCP 传输 tar + docker load + 启动
+#
+# 关键设计: 镜像在 GitHub Actions 端构建，打成 tar 传到 ECS，
+#           彻底绕过 ECS 访问 Docker Hub 的问题！
+# ============================================================
+
+name: Flask CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  # ============================================
+  # Job 1: 代码验证 + 测试
+  # ============================================
+  validate:
+    name: "① 验证 & 测试"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 安装依赖
+        run: pip install -r requirements.txt
+
+      - name: 运行测试
+        run: python -m pytest test_app.py -v
+
+  # ============================================
+  # Job 2: 构建 Docker 镜像 → 导出 tar
+  # ============================================
+  build:
+    name: "② 构建镜像"
+    needs: validate
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 构建 Docker 镜像
+        run: docker build -t simple-web:latest .
+
+      - name: 导出镜像为 tar
+        run: docker save simple-web:latest -o /tmp/simple-web.tar
+
+      - name: 压缩镜像（减小体积）
+        run: gzip -f /tmp/simple-web.tar
+
+      - name: 上传镜像 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-image
+          path: /tmp/simple-web.tar.gz
+          retention-days: 1
+
+  # ============================================
+  # Job 3: 部署到阿里云 ECS
+  # ============================================
+  deploy:
+    name: "③ 部署至 ECS"
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    environment:
+      name: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 下载镜像 artifact（放到工作区）
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-image
+          path: ./
+
+      - name: 传输 compose + 镜像到服务器
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: "docker-compose.prod.yml,simple-web.tar.gz"
+          target: "/opt/simple-web/"
+          strip_components: 0
+
+      - name: 加载镜像并启动服务
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            set -e
+            cd /opt/simple-web
+
+            echo "=== [1/5] 加载 Docker 镜像 ==="
+            gunzip -f simple-web.tar.gz
+            docker load -i simple-web.tar
+            rm -f simple-web.tar
+
+            echo "=== [2/5] 复制 compose 文件 ==="
+            cp docker-compose.prod.yml docker-compose.yml
+
+            echo "=== [3/5] 停止旧容器 ==="
+            docker compose down --remove-orphans || true
+
+            echo "=== [4/5] 启动新容器 ==="
+            docker compose up -d
+
+            echo "=== [5/5] 健康检查 ==="
+            sleep 3
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:80 || echo "000")
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "✅ 部署成功！HTTP: $HTTP_CODE"
+            else
+              echo "⚠️  返回 $HTTP_CODE，查看日志："
+              docker compose logs --tail=20
+            fi
+
+            echo ""
+            echo "=== 运行状态 ==="
+            docker compose ps
+
+  # ============================================
+  # Job 4: 通知
+  # ============================================
+  notify:
+    name: "④ 结果通知"
+    needs: [validate, build, deploy]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: 汇总
+        run: |
+          echo "========================================="
+          echo "  CI/CD 流水线完成"
+          echo "========================================="
+          echo "  ① 验证测试 : ${{ needs.validate.result }}"
+          echo "  ② 构建镜像 : ${{ needs.build.result }}"
+          echo "  ③ 生产部署 : ${{ needs.deploy.result }}"
+          echo "========================================="
+          if [ "${{ needs.deploy.result }}" = "success" ]; then
+            echo "  🌐 http://${{ secrets.SSH_HOST }}"
+          fi

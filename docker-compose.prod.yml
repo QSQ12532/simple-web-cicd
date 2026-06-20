@@ -1,0 +1,6 @@
+services:
+  web:
+    image: simple-web:latest
+    ports:
+      - "80:8080"
+    restart: unless-stopped
